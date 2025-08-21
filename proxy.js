@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import express from 'express';
 import fetch from 'node-fetch';
@@ -21,15 +19,32 @@ class LinearWorkspaceProxy {
     this.port = process.env[`${workspaceName.toUpperCase()}_PORT`] || 3000;
     this.oauthClientId = process.env[`${workspaceName.toUpperCase()}_OAUTH_CLIENT_ID`];
     this.oauthClientSecret = process.env[`${workspaceName.toUpperCase()}_OAUTH_CLIENT_SECRET`];
-    this.accessToken = null;
+    this.accessToken = process.env[`${workspaceName.toUpperCase()}_ACCESS_TOKEN`] || null;
     
-    this.server = new Server({
+    this.server = new McpServer({
       name: `${workspaceName}Linear`,
       version: '1.0.0',
     });
     
     this.linearClient = null;
-    this.setupOAuthServer();
+    
+    // Only setup OAuth server if we're NOT in MCP mode
+    const mcpMode = process.env.MCP_MODE === 'true';
+    
+    if (mcpMode) {
+      // In MCP mode: use the access token directly, no OAuth server
+      if (this.accessToken) {
+        this.connectToLinearMCP().catch(console.error);
+      }
+    } else {
+      // Interactive mode: setup OAuth server if no access token
+      if (!this.accessToken) {
+        this.setupOAuthServer();
+      } else {
+        this.connectToLinearMCP().catch(console.error);
+      }
+    }
+    
     this.setupMCPProxy();
   }
 
@@ -64,8 +79,25 @@ class LinearWorkspaceProxy {
           })
         });
 
+        if (!tokenResponse.ok) {
+          const errorText = await tokenResponse.text();
+          throw new Error(`OAuth token exchange failed: ${tokenResponse.status} ${errorText}`);
+        }
+
         const tokenData = await tokenResponse.json();
+        const mcpMode = process.env.MCP_MODE === 'true';
+        if (!mcpMode) {
+          console.log('Token response:', tokenData); // Debug log
+        }
+        
+        if (!tokenData.access_token) {
+          throw new Error(`No access token in response: ${JSON.stringify(tokenData)}`);
+        }
+        
         this.accessToken = tokenData.access_token;
+        if (!mcpMode) {
+          console.log(`✅ Access token received for ${this.workspaceName}`);
+        }
         
         // Initialize Linear MCP client connection with token
         await this.connectToLinearMCP();
@@ -76,7 +108,10 @@ class LinearWorkspaceProxy {
           <script>setTimeout(() => window.close(), 2000);</script>
         `);
       } catch (error) {
-        console.error('OAuth error:', error);
+        const mcpMode = process.env.MCP_MODE === 'true';
+        if (!mcpMode) {
+          console.error('OAuth error:', error);
+        }
         res.status(500).send(`Authentication failed: ${error.message}`);
       }
     });
@@ -91,9 +126,12 @@ class LinearWorkspaceProxy {
     });
 
     this.app.listen(this.port, () => {
-      console.log(`${this.workspaceName} proxy OAuth server running on port ${this.port}`);
-      if (!this.accessToken) {
-        console.log(`🔗 Authenticate at: http://localhost:${this.port}/auth`);
+      const mcpMode = process.env.MCP_MODE === 'true';
+      if (!mcpMode) {
+        console.log(`${this.workspaceName} proxy OAuth server running on port ${this.port}`);
+        if (!this.accessToken) {
+          console.log(`🔗 Authenticate at: http://localhost:${this.port}/auth`);
+        }
       }
     });
   }
@@ -107,7 +145,10 @@ class LinearWorkspaceProxy {
     // Note: This is a simplified approach - in practice you'd connect to Linear's SSE endpoint
     // with the access token and proxy the MCP protocol
     
-    console.log(`🔌 Connected to Linear MCP for ${this.workspaceName} workspace`);
+    const mcpMode = process.env.MCP_MODE === 'true';
+    if (!mcpMode) {
+      console.log(`🔌 Connected to Linear MCP for ${this.workspaceName} workspace`);
+    }
     this.linearClient = { connected: true }; // Placeholder
   }
 
@@ -127,14 +168,16 @@ class LinearWorkspaceProxy {
     ];
 
     linearTools.forEach(toolName => {
-      const proxiedToolName = `${this.toolPrefix}:${toolName}`;
+      const proxiedToolName = `${this.toolPrefix}_${toolName}`;
       
-      this.server.tool(proxiedToolName, {
-        description: `${toolName.replace('_', ' ')} in ${this.workspaceName} Linear workspace`,
+      this.server.registerTool(proxiedToolName, {
+        title: `${toolName.replace(/_/g, ' ')} in ${this.workspaceName}`,
+        description: `${toolName.replace(/_/g, ' ')} in ${this.workspaceName} Linear workspace`,
         inputSchema: {
           type: 'object',
           properties: {}, // Would be populated based on Linear's actual schema
-          additionalProperties: true
+          additionalProperties: false,
+          $schema: 'http://json-schema.org/draft-07/schema#'
         }
       }, async (args) => {
         if (!this.linearClient) {
@@ -169,16 +212,23 @@ if (!workspaceName) {
   process.exit(1);
 }
 
-// Validate OAuth credentials
+// Validate OAuth credentials (unless we have an access token in MCP mode)
 const oauthClientId = process.env[`${workspaceName.toUpperCase()}_OAUTH_CLIENT_ID`];
 const oauthClientSecret = process.env[`${workspaceName.toUpperCase()}_OAUTH_CLIENT_SECRET`];
+const accessToken = process.env[`${workspaceName.toUpperCase()}_ACCESS_TOKEN`];
+const mcpMode = process.env.MCP_MODE === 'true';
 
 if (!oauthClientId || !oauthClientSecret) {
-  console.error(`❌ Missing OAuth credentials for ${workspaceName} workspace`);
-  console.error(`Set these environment variables:`);
-  console.error(`${workspaceName.toUpperCase()}_OAUTH_CLIENT_ID=...`);
-  console.error(`${workspaceName.toUpperCase()}_OAUTH_CLIENT_SECRET=...`);
-  process.exit(1);
+  // In MCP mode with access token, we don't need OAuth credentials
+  if (mcpMode && accessToken) {
+    // Skip OAuth validation - we have access token
+  } else {
+    console.error(`❌ Missing OAuth credentials for ${workspaceName} workspace`);
+    console.error(`Set these environment variables:`);
+    console.error(`${workspaceName.toUpperCase()}_OAUTH_CLIENT_ID=...`);
+    console.error(`${workspaceName.toUpperCase()}_OAUTH_CLIENT_SECRET=...`);
+    process.exit(1);
+  }
 }
 
 // Start the proxy

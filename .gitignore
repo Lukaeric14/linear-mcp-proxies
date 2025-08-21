@@ -59,3 +59,7 @@ jspm_packages/
 # Temporary files
 tmp/
 temp/
+
+# Claude Desktop configuration (contains API tokens)
+~/Library/Application Support/Claude/claude_desktop_config.json
+**/claude_desktop_config.json
