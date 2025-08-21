@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "KeyLeadLinear": {
+      "command": "bash",
+      "args": [
+        "./start.sh"
+      ],
+      "cwd": "./keylead-proxy",
+      "env": {}
+    }
+  }
+}

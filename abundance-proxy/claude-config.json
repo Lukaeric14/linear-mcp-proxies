@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "AbundanceLinear": {
+      "command": "bash",
+      "args": [
+        "./start.sh"
+      ],
+      "cwd": "./abundance-proxy",
+      "env": {}
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "linear-mcp-proxy",
+  "version": "1.0.0",
+  "description": "Simple proxy wrapper for Linear's remote MCP server to support multiple workspaces",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node proxy.js",
+    "setup": "node setup-workspace.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.9.0",
+    "node-fetch": "^3.3.2",
+    "express": "^4.18.2"
+  },
+  "keywords": [
+    "mcp",
+    "linear",
+    "proxy",
+    "workspace"
+  ]
+}
